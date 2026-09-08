@@ -1,0 +1,4 @@
+[build]
+# Keep the compiled DLL inside the Godot project so the .gdextension file can
+# load it in the editor and exported builds can package it later.
+target-dir = "../godot/addons/gdgs_native/bin"

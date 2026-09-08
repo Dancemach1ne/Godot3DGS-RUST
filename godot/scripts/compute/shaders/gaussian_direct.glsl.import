@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://ckh02jn32cbps"
+path="res://.godot/imported/gaussian_direct.glsl-17fb16fee7314af0c0f27b67033d4821.res"
+
+[deps]
+
+source_file="res://scripts/compute/shaders/gaussian_direct.glsl"
+dest_files=["res://.godot/imported/gaussian_direct.glsl-17fb16fee7314af0c0f27b67033d4821.res"]
+
+[params]
+

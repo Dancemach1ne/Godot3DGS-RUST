@@ -1,0 +1,9 @@
+[configuration]
+
+entry_symbol = "gdext_rust_init"
+compatibility_minimum = "4.2"
+
+[libraries]
+
+windows.debug.x86_64 = "res://addons/gdgs_native/bin/debug/godot3dgs_native.dll"
+windows.release.x86_64 = "res://addons/gdgs_native/bin/release/godot3dgs_native.dll"

@@ -1,0 +1,25 @@
+# Personal planning and learning notes; source code carries its own comments.
+/docs/
+
+# Large local 3DGS datasets and Godot's generated import metadata/resources.
+/point_cloud.ply
+/godot/assets/*.ply
+/godot/assets/*.ply.import
+/godot/assets/*.res
+
+# Godot editor cache and imported-resource cache.
+/godot/.godot/
+
+# Rust and GDExtension build products; regenerate with cargo build.
+/rust/target/
+/godot/addons/gdgs_native/bin/
+*.dll
+*.pdb
+
+# Local IDE and operating-system state.
+.idea/
+.vscode/
+.vs/
+*.user
+Thumbs.db
+Desktop.ini

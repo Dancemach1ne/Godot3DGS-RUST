@@ -1,0 +1,11 @@
+[package]
+name = "godot3dgs_native"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+godot = "0.4"
