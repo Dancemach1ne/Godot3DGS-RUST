@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::fs;
 
-use crate::splat::{SplatRecord, BYTES_PER_SPLAT, SH_FLOATS_PER_SPLAT};
+use crate::splat::{BYTES_PER_SPLAT, SH_FLOATS_PER_SPLAT, SplatRecord};
 
 #[derive(Debug)]
 struct Property {
@@ -111,11 +111,13 @@ pub fn decode_standard_ply(bytes: &[u8]) -> Result<DecodedPly, String> {
 
     let (vertex, data) = vertex_data.ok_or_else(|| "PLY has no vertex element".to_owned())?;
     for required in [
-        "x", "y", "z", "f_dc_0", "f_dc_1", "f_dc_2", "opacity", "scale_0", "scale_1",
-        "rot_0", "rot_1", "rot_2", "rot_3",
+        "x", "y", "z", "f_dc_0", "f_dc_1", "f_dc_2", "opacity", "scale_0", "scale_1", "rot_0",
+        "rot_1", "rot_2", "rot_3",
     ] {
         if !vertex.properties.contains_key(required) {
-            return Err(format!("PLY vertex element is missing required property '{required}'"));
+            return Err(format!(
+                "PLY vertex element is missing required property '{required}'"
+            ));
         }
     }
 
@@ -148,8 +150,18 @@ pub fn decode_standard_ply(bytes: &[u8]) -> Result<DecodedPly, String> {
         for coeff in 0..15 {
             let dst = 3 + coeff * 3;
             sh[dst] = property_f32(record, &vertex.properties, &format!("f_rest_{coeff}"), 0.0)?;
-            sh[dst + 1] = property_f32(record, &vertex.properties, &format!("f_rest_{}", coeff + 15), 0.0)?;
-            sh[dst + 2] = property_f32(record, &vertex.properties, &format!("f_rest_{}", coeff + 30), 0.0)?;
+            sh[dst + 1] = property_f32(
+                record,
+                &vertex.properties,
+                &format!("f_rest_{}", coeff + 15),
+                0.0,
+            )?;
+            sh[dst + 2] = property_f32(
+                record,
+                &vertex.properties,
+                &format!("f_rest_{}", coeff + 30),
+                0.0,
+            )?;
         }
         raw_positions.push(position);
         records.push((scales, rotation, opacity, sh));
@@ -160,11 +172,16 @@ pub fn decode_standard_ply(bytes: &[u8]) -> Result<DecodedPly, String> {
     let mut positions = Vec::with_capacity(vertex.count);
     for (index, (scales, rotation, opacity, sh)) in records.into_iter().enumerate() {
         let position = subtract(raw_positions[index], center);
-        let splat = SplatRecord::from_components(position, covariance(scales, rotation), opacity, sh);
+        let splat =
+            SplatRecord::from_components(position, covariance(scales, rotation), opacity, sh);
         point_data.extend_from_slice(&splat.to_le_bytes());
         positions.push(position);
     }
-    Ok(DecodedPly { point_count: vertex.count, point_data, positions })
+    Ok(DecodedPly {
+        point_count: vertex.count,
+        point_data,
+        positions,
+    })
 }
 
 fn parse_header(bytes: &[u8]) -> Result<(Vec<Element>, usize), String> {
@@ -177,67 +194,159 @@ fn parse_header(bytes: &[u8]) -> Result<(Vec<Element>, usize), String> {
     let mut elements = Vec::new();
     while let Some(line) = next_line(bytes, &mut offset) {
         let parts: Vec<_> = line.split_ascii_whitespace().collect();
-        if parts.is_empty() || matches!(parts[0], "comment" | "obj_info") { continue; }
-        if parts[0] == "end_header" { break; }
+        if parts.is_empty() || matches!(parts[0], "comment" | "obj_info") {
+            continue;
+        }
+        if parts[0] == "end_header" {
+            break;
+        }
         match parts.as_slice() {
             ["format", "binary_little_endian", _] => format_ok = true,
-            ["format", format, _] => return Err(format!("only binary_little_endian PLY is supported, found '{format}'")),
-            ["element", name, count] => elements.push(Element { name: (*name).to_owned(), count: count.parse().map_err(|_| format!("invalid element count '{count}'"))?, stride: 0, properties: HashMap::new() }),
-            ["property", "list", ..] => return Err("PLY list properties are unsupported".to_owned()),
+            ["format", format, _] => {
+                return Err(format!(
+                    "only binary_little_endian PLY is supported, found '{format}'"
+                ));
+            }
+            ["element", name, count] => elements.push(Element {
+                name: (*name).to_owned(),
+                count: count
+                    .parse()
+                    .map_err(|_| format!("invalid element count '{count}'"))?,
+                stride: 0,
+                properties: HashMap::new(),
+            }),
+            ["property", "list", ..] => {
+                return Err("PLY list properties are unsupported".to_owned());
+            }
             ["property", kind, name] => {
-                let kind = ScalarKind::parse(kind).ok_or_else(|| format!("unsupported PLY property type '{kind}'"))?;
-                let element = elements.last_mut().ok_or_else(|| "PLY property appears before an element".to_owned())?;
-                let property = Property { offset: element.stride, kind };
+                let kind = ScalarKind::parse(kind)
+                    .ok_or_else(|| format!("unsupported PLY property type '{kind}'"))?;
+                let element = elements
+                    .last_mut()
+                    .ok_or_else(|| "PLY property appears before an element".to_owned())?;
+                let property = Property {
+                    offset: element.stride,
+                    kind,
+                };
                 element.stride += kind.size();
                 element.properties.insert((*name).to_owned(), property);
             }
             _ => return Err(format!("unsupported PLY header line '{line}'")),
         }
     }
-    if !format_ok { return Err("PLY format must be binary_little_endian".to_owned()); }
-    if elements.is_empty() { return Err("PLY contains no elements".to_owned()); }
+    if !format_ok {
+        return Err("PLY format must be binary_little_endian".to_owned());
+    }
+    if elements.is_empty() {
+        return Err("PLY contains no elements".to_owned());
+    }
     Ok((elements, offset))
 }
 
 fn next_line<'a>(bytes: &'a [u8], offset: &mut usize) -> Option<&'a str> {
-    if *offset >= bytes.len() { return None; }
+    if *offset >= bytes.len() {
+        return None;
+    }
     let start = *offset;
-    while *offset < bytes.len() && bytes[*offset] != b'\n' { *offset += 1; }
+    while *offset < bytes.len() && bytes[*offset] != b'\n' {
+        *offset += 1;
+    }
     let end = *offset;
-    if *offset < bytes.len() { *offset += 1; }
-    std::str::from_utf8(&bytes[start..end]).ok().map(|line| line.trim_end_matches('\r'))
+    if *offset < bytes.len() {
+        *offset += 1;
+    }
+    std::str::from_utf8(&bytes[start..end])
+        .ok()
+        .map(|line| line.trim_end_matches('\r'))
 }
 
-fn property_f32(record: &[u8], properties: &HashMap<String, Property>, name: &str, default: f32) -> Result<f32, String> {
-    let Some(property) = properties.get(name) else { return Ok(default); };
-    property.kind.read(record.get(property.offset..).ok_or_else(|| format!("property '{name}' offset is invalid"))?)
+fn property_f32(
+    record: &[u8],
+    properties: &HashMap<String, Property>,
+    name: &str,
+    default: f32,
+) -> Result<f32, String> {
+    let Some(property) = properties.get(name) else {
+        return Ok(default);
+    };
+    property.kind.read(
+        record
+            .get(property.offset..)
+            .ok_or_else(|| format!("property '{name}' offset is invalid"))?,
+    )
 }
 
-fn sigmoid(value: f32) -> f32 { 1.0 / (1.0 + (-value).exp()) }
+fn sigmoid(value: f32) -> f32 {
+    1.0 / (1.0 + (-value).exp())
+}
 
 fn centroid(points: &[[f32; 3]]) -> [f32; 3] {
-    if points.is_empty() { return [0.0; 3]; }
-    let sum = points.iter().fold([0.0; 3], |mut total, point| { total[0] += point[0]; total[1] += point[1]; total[2] += point[2]; total });
-    [sum[0] / points.len() as f32, sum[1] / points.len() as f32, sum[2] / points.len() as f32]
+    if points.is_empty() {
+        return [0.0; 3];
+    }
+    let sum = points.iter().fold([0.0; 3], |mut total, point| {
+        total[0] += point[0];
+        total[1] += point[1];
+        total[2] += point[2];
+        total
+    });
+    [
+        sum[0] / points.len() as f32,
+        sum[1] / points.len() as f32,
+        sum[2] / points.len() as f32,
+    ]
 }
 
-fn subtract(a: [f32; 3], b: [f32; 3]) -> [f32; 3] { [a[0] - b[0], a[1] - b[1], a[2] - b[2]] }
+fn subtract(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+}
 
 fn normalize_quaternion([x, y, z, w]: [f32; 4]) -> [f32; 4] {
     let length = (x * x + y * y + z * z + w * w).sqrt();
-    if length.is_finite() && length > 0.0 { [x / length, y / length, z / length, w / length] } else { [0.0, 0.0, 0.0, 1.0] }
+    if length.is_finite() && length > 0.0 {
+        [x / length, y / length, z / length, w / length]
+    } else {
+        [0.0, 0.0, 0.0, 1.0]
+    }
 }
 
 /// Upper triangle `[xx, xy, xz, yy, yz, zz]` of `R * diag(scale²) * Rᵀ`.
 fn covariance(scale: [f32; 3], [x, y, z, w]: [f32; 4]) -> [f32; 6] {
     let r = [
-        [1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y - z * w), 2.0 * (x * z + y * w)],
-        [2.0 * (x * y + z * w), 1.0 - 2.0 * (x * x + z * z), 2.0 * (y * z - x * w)],
-        [2.0 * (x * z - y * w), 2.0 * (y * z + x * w), 1.0 - 2.0 * (x * x + y * y)],
+        [
+            1.0 - 2.0 * (y * y + z * z),
+            2.0 * (x * y - z * w),
+            2.0 * (x * z + y * w),
+        ],
+        [
+            2.0 * (x * y + z * w),
+            1.0 - 2.0 * (x * x + z * z),
+            2.0 * (y * z - x * w),
+        ],
+        [
+            2.0 * (x * z - y * w),
+            2.0 * (y * z + x * w),
+            1.0 - 2.0 * (x * x + y * y),
+        ],
     ];
-    let s = [scale[0].max(1e-6).powi(2), scale[1].max(1e-6).powi(2), scale[2].max(1e-6).powi(2)];
-    let entry = |row: usize, col: usize| (0..3).map(|axis| r[row][axis] * s[axis] * r[col][axis]).sum::<f32>();
-    [entry(0, 0), entry(0, 1), entry(0, 2), entry(1, 1), entry(1, 2), entry(2, 2)]
+    let s = [
+        scale[0].max(1e-6).powi(2),
+        scale[1].max(1e-6).powi(2),
+        scale[2].max(1e-6).powi(2),
+    ];
+    let entry = |row: usize, col: usize| {
+        (0..3)
+            .map(|axis| r[row][axis] * s[axis] * r[col][axis])
+            .sum::<f32>()
+    };
+    [
+        entry(0, 0),
+        entry(0, 1),
+        entry(0, 2),
+        entry(1, 1),
+        entry(1, 2),
+        entry(2, 2),
+    ]
 }
 
 #[cfg(test)]
@@ -246,8 +355,17 @@ mod tests {
 
     fn fixture() -> Vec<u8> {
         let mut bytes = b"ply\nformat binary_little_endian 1.0\nelement vertex 2\nproperty float x\nproperty float y\nproperty float z\nproperty float f_dc_0\nproperty float f_dc_1\nproperty float f_dc_2\nproperty float opacity\nproperty float scale_0\nproperty float scale_1\nproperty float scale_2\nproperty float rot_0\nproperty float rot_1\nproperty float rot_2\nproperty float rot_3\nend_header\n".to_vec();
-        for values in [[1.0_f32, 2.0, 3.0, 0.1, 0.2, 0.3, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0], [3.0, 4.0, 5.0, 0.4, 0.5, 0.6, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0]] {
-            for value in values { bytes.extend_from_slice(&value.to_le_bytes()); }
+        for values in [
+            [
+                1.0_f32, 2.0, 3.0, 0.1, 0.2, 0.3, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0,
+            ],
+            [
+                3.0, 4.0, 5.0, 0.4, 0.5, 0.6, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0,
+            ],
+        ] {
+            for value in values {
+                bytes.extend_from_slice(&value.to_le_bytes());
+            }
         }
         bytes
     }

@@ -1,8 +1,9 @@
-use godot::prelude::*;
-
-mod splat;
+mod collision;
 mod ply;
 mod sort;
+mod splat;
+
+use godot::prelude::*;
 
 struct Godot3DgsExtension;
 
@@ -80,9 +81,72 @@ impl GdgsNative {
                 result.set(
                     "positions",
                     PackedVector3Array::from(
-                        decoded.positions.into_iter().map(|position| Vector3::new(position[0], position[1], position[2])).collect::<Vec<_>>(),
+                        decoded
+                            .positions
+                            .into_iter()
+                            .map(|position| Vector3::new(position[0], position[1], position[2]))
+                            .collect::<Vec<_>>(),
                     ),
                 );
+                result
+            }
+            Err(message) => {
+                let mut result = VarDictionary::new();
+                result.set("ok", false);
+                result.set("message", message);
+                result
+            }
+        }
+    }
+
+    /// Builds a static collision surface from the same packed splat records
+    /// used by the renderer. Heavy Gaussian voxelization and greedy meshing
+    /// stay in Rust; Godot only turns the returned triangle soup into a
+    /// ConcavePolygonShape3D.
+    #[func]
+    fn generate_collision(
+        &self,
+        point_data: PackedByteArray,
+        point_count: i64,
+        voxel_size: f64,
+        opacity_cutoff: f64,
+    ) -> VarDictionary {
+        let bytes = point_data.to_vec();
+        match collision::generate_collision(
+            &bytes,
+            point_count,
+            voxel_size as f32,
+            opacity_cutoff as f32,
+        ) {
+            Ok(output) => {
+                let mut stats = VarDictionary::new();
+                stats.set("input_splats", output.stats.input_splats as i64);
+                stats.set("sample_stride", output.stats.sample_stride as i64);
+                stats.set("valid_splats", output.stats.valid_splats as i64);
+                stats.set("skipped_splats", output.stats.skipped_splats as i64);
+                stats.set("position_outliers", output.stats.position_outliers as i64);
+                stats.set("voxel_size", output.stats.voxel_size as f64);
+                stats.set("grid_x", output.stats.grid_dimensions[0] as i64);
+                stats.set("grid_y", output.stats.grid_dimensions[1] as i64);
+                stats.set("grid_z", output.stats.grid_dimensions[2] as i64);
+                stats.set("occupied_voxels", output.stats.occupied_voxels as i64);
+                stats.set("removed_voxels", output.stats.removed_voxels as i64);
+                stats.set("quads", output.stats.quads as i64);
+                stats.set("triangles", output.stats.triangles as i64);
+
+                let mut result = VarDictionary::new();
+                result.set("ok", true);
+                result.set(
+                    "faces",
+                    PackedVector3Array::from(
+                        output
+                            .faces
+                            .into_iter()
+                            .map(|p| Vector3::new(p[0], p[1], p[2]))
+                            .collect::<Vec<_>>(),
+                    ),
+                );
+                result.set("stats", stats);
                 result
             }
             Err(message) => {

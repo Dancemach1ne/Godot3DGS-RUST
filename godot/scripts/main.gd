@@ -8,6 +8,21 @@ const GaussianCompositorEffectScript = preload("res://scripts/compute/full/gauss
 const FreeFlyCameraScript = preload("res://scripts/free_fly_camera.gd")
 const IMPORTED_TEST_PLY_PATH := "res://assets/point_cloud.ply"
 
+@export_group("Collision")
+@export var generate_collision_on_start := false
+@export_range(0.0, 10.0, 0.001, "or_greater") var collision_voxel_size := 0.0
+@export_range(0.001, 0.999, 0.001) var collision_opacity_cutoff := 0.1
+
+@export_group("Collision Test Cube")
+@export var spawn_collision_test_cube := true
+@export var collision_test_cube_position := Vector3(0.0, 3.0, 0.0)
+@export_range(0.1, 10.0, 0.1, "or_greater") var collision_test_cube_size := 1.0
+
+@export_group("Rendering Diagnostics")
+## Direct Texture was useful while bringing up Compute, but it covers normal
+## Godot meshes. Keep it optional so the collision cube can be seen.
+@export var direct_texture_diagnostic_mode := false
+
 func _ready() -> void:
 	var native := GdgsNative.new()
 	print("[Godot3DGS-RUST] ", native.get_build_info())
@@ -27,6 +42,16 @@ func _ready() -> void:
 	var decoded_positions: PackedVector3Array = decode_result["positions"]
 	assert(decoded_positions == PackedVector3Array([Vector3(-1.0, -1.0, -1.0), Vector3(1.0, 1.0, 1.0)]))
 	print("[Godot3DGS-RUST] Rust standard-PLY decode validated")
+	var collision_result: Dictionary = native.generate_collision(
+		decode_result["point_data"],
+		int(decode_result["point_count"]),
+		0.02,
+		0.1
+	)
+	assert(collision_result.get("ok", false), str(collision_result.get("message", "Rust collision bake failed")))
+	var collision_faces: PackedVector3Array = collision_result.get("faces", PackedVector3Array())
+	assert(not collision_faces.is_empty() and collision_faces.size() % 3 == 0)
+	print("[Godot3DGS-RUST] Rust collision bridge validated: %d triangles" % (collision_faces.size() / 3))
 	_show_compute_fixture(decode_result)
 
 func _show_raster_fixture(decode_result: Dictionary) -> void:
@@ -40,9 +65,9 @@ func _show_raster_fixture(decode_result: Dictionary) -> void:
 	add_child(raster)
 	var camera := Camera3D.new()
 	camera.position = Vector3(0.0, 0.0, 6.0)
-	camera.look_at(Vector3.ZERO)
 	camera.set_script(FreeFlyCameraScript)
 	add_child(camera)
+	camera.look_at(Vector3.ZERO)
 	camera.current = true
 	print("[Godot3DGS-RUST] Raster fixture created: %d Gaussian instances" % resource.point_count)
 
@@ -65,11 +90,13 @@ func _show_compute_fixture(decode_result: Dictionary) -> void:
 	var splat_node := GaussianComputeNodeScript.new()
 	splat_node.name = "GaussianComputeFixture"
 	splat_node.gaussian = resource
+	splat_node.collision_voxel_size = collision_voxel_size
+	splat_node.collision_opacity_cutoff = collision_opacity_cutoff
+	splat_node.generate_collision_on_ready = generate_collision_on_start
+	splat_node.collision_generated.connect(_on_collision_generated)
 	add_child(splat_node)
-	# Milestone 4 diagnostic: display the Compute output texture directly. This
-	# distinguishes an empty Compute result from a compositor-blending problem.
 	var compute_effect := GaussianCompositorEffectScript.new()
-	compute_effect.display_mode = 1 # GaussianCompositorEffect.DisplayMode.DIRECT_TEXTURE
+	compute_effect.display_mode = 1 if direct_texture_diagnostic_mode else 0
 	var compositor := Compositor.new()
 	compositor.compositor_effects = [compute_effect]
 	var environment := Environment.new()
@@ -81,11 +108,54 @@ func _show_compute_fixture(decode_result: Dictionary) -> void:
 	add_child(world_environment)
 	var camera := Camera3D.new()
 	camera.position = Vector3(0.0, 0.0, 6.0)
-	camera.look_at(Vector3.ZERO)
 	camera.set_script(FreeFlyCameraScript)
 	add_child(camera)
+	camera.look_at(Vector3.ZERO)
 	camera.current = true
-	print("[Godot3DGS-RUST] Full Compute scene registered: %d GPU splats from %s (direct-output diagnostic mode)" % [resource.point_count, source_label])
+	var display_label := "direct-output diagnostic" if direct_texture_diagnostic_mode else "scene compositor"
+	print("[Godot3DGS-RUST] Full Compute scene registered: %d GPU splats from %s (%s mode)" % [resource.point_count, source_label, display_label])
+
+func _on_collision_generated(result: Dictionary) -> void:
+	if not result.get("ok", false) or not spawn_collision_test_cube:
+		return
+	_spawn_collision_test_cube()
+
+func _spawn_collision_test_cube() -> void:
+	var existing := get_node_or_null("CollisionTestCube") as RigidBody3D
+	if existing != null:
+		existing.queue_free()
+
+	var body := RigidBody3D.new()
+	body.name = "CollisionTestCube"
+	body.position = collision_test_cube_position
+	body.mass = 1.0
+	body.continuous_cd = true
+	body.contact_monitor = true
+	body.max_contacts_reported = 8
+	body.body_entered.connect(_on_test_cube_body_entered)
+	add_child(body)
+
+	var box_shape := BoxShape3D.new()
+	box_shape.size = Vector3.ONE * collision_test_cube_size
+	var collision_shape := CollisionShape3D.new()
+	collision_shape.name = "CollisionShape3D"
+	collision_shape.shape = box_shape
+	body.add_child(collision_shape)
+
+	var box_mesh := BoxMesh.new()
+	box_mesh.size = Vector3.ONE * collision_test_cube_size
+	var material := StandardMaterial3D.new()
+	material.albedo_color = Color(1.0, 0.12, 0.05)
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	box_mesh.material = material
+	var mesh_instance := MeshInstance3D.new()
+	mesh_instance.name = "VisibleCube"
+	mesh_instance.mesh = box_mesh
+	body.add_child(mesh_instance)
+	print("[Godot3DGS-RUST] Collision test cube spawned at %s" % body.position)
+
+func _on_test_cube_body_entered(other: Node) -> void:
+	print("[Godot3DGS-RUST] Collision test cube contacted: %s" % other.name)
 
 func _make_fixture_splats_immediately_visible(raw_data: PackedByteArray) -> PackedByteArray:
 	# In the 60-float GPU contract, offset 3 is `time` for the reference

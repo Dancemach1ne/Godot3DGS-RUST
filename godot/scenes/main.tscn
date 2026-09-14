@@ -1,6 +1,8 @@
-[gd_scene load_steps=2 format=3]
+[gd_scene format=3 uid="uid://mdcpn252u4g1"]
 
-[ext_resource type="Script" path="res://scripts/main.gd" id="1_main"]
+[ext_resource type="Script" uid="uid://cpdxai712dcei" path="res://scripts/main.gd" id="1_main"]
 
-[node name="Main" type="Node"]
+[node name="Main" type="Node" unique_id=670092392]
 script = ExtResource("1_main")
+generate_collision_on_start = true
+collision_voxel_size = 1.0

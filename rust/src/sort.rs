@@ -36,7 +36,12 @@ impl GdgsSortState {
             let b = dot(self.positions[right], view_direction_local);
             b.total_cmp(&a)
         });
-        PackedFloat32Array::from(indices.into_iter().map(|index| index as f32).collect::<Vec<_>>())
+        PackedFloat32Array::from(
+            indices
+                .into_iter()
+                .map(|index| index as f32)
+                .collect::<Vec<_>>(),
+        )
     }
 }
 
